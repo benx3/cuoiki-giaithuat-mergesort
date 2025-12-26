@@ -18,7 +18,10 @@ streamlit run app.py
 
 Ứng dụng sẽ mở tại: http://localhost:8501
 
-**Lưu ý**: File `creditcard.csv` cần được đặt cùng thư mục với `app.py` để sử dụng tính năng load dữ liệu CSV.
+**⚠️ Lưu ý về dữ liệu CSV**: 
+- File `creditcard.csv` không có trong repository (quá lớn > 100MB)
+- Xem hướng dẫn tải trong file [DATA_SETUP.md](DATA_SETUP.md)
+- Ứng dụng vẫn hoạt động đầy đủ với 5 preset datasets khác
 
 ## 📊 Tính năng
 
