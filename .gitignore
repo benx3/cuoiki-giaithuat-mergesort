@@ -1,0 +1,24 @@
+# GitHub Copilot Instructions (chỉ dùng local)
+.github/
+
+# Large dataset files (> 100MB)
+creditcard.csv
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Virtual environment
+venv/
+env/
+ENV/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
