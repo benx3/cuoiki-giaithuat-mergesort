@@ -51,6 +51,82 @@ PRESET_DATASETS = {
 
 
 # -----------------------------
+# Cache Functions for Credit Card Dataset
+# -----------------------------
+CACHE_DIR = "cache"
+CACHE_FILE = os.path.join(CACHE_DIR, "creditcard_results.json")
+
+def get_cache_key(arr: List[int]) -> str:
+    """Generate a cache key based on array length and hash"""
+    import hashlib
+    arr_str = ",".join(map(str, arr[:100]))  # Use first 100 elements for hash
+    return f"{len(arr)}_{hashlib.md5(arr_str.encode()).hexdigest()[:8]}"
+
+def save_comparison_cache(arr: List[int], results: Dict[str, Any]) -> bool:
+    """Save comparison results to cache file"""
+    try:
+        os.makedirs(CACHE_DIR, exist_ok=True)
+        
+        cache_key = get_cache_key(arr)
+        
+        # Convert results to serializable format (exclude tree objects)
+        cache_data = {
+            "cache_key": cache_key,
+            "array_length": len(arr),
+            "array_sample": arr[:50],  # Store first 50 elements for reference
+            "results": {}
+        }
+        
+        for algo_name, result in results.items():
+            cache_data["results"][algo_name] = {
+                "time": result["time"],
+                "metrics": result["metrics"],
+                "sorted": result["sorted"][:100] if result["sorted"] else [],  # Store first 100 sorted
+                "sorted_length": len(result["sorted"]) if result["sorted"] else 0
+            }
+        
+        with open(CACHE_FILE, 'w', encoding='utf-8') as f:
+            json.dump(cache_data, f, ensure_ascii=False, indent=2)
+        
+        return True
+    except Exception as e:
+        print(f"Error saving cache: {e}")
+        return False
+
+def load_comparison_cache(arr: List[int]) -> Optional[Dict[str, Any]]:
+    """Load comparison results from cache if exists and matches"""
+    try:
+        if not os.path.exists(CACHE_FILE):
+            return None
+        
+        with open(CACHE_FILE, 'r', encoding='utf-8') as f:
+            cache_data = json.load(f)
+        
+        # Check if cache matches current array
+        cache_key = get_cache_key(arr)
+        if cache_data.get("cache_key") != cache_key:
+            return None
+        
+        if cache_data.get("array_length") != len(arr):
+            return None
+        
+        return cache_data["results"]
+    except Exception as e:
+        print(f"Error loading cache: {e}")
+        return None
+
+def clear_cache():
+    """Clear the cache file"""
+    try:
+        if os.path.exists(CACHE_FILE):
+            os.remove(CACHE_FILE)
+            return True
+    except Exception as e:
+        print(f"Error clearing cache: {e}")
+    return False
+
+
+# -----------------------------
 # Tree Node Structure
 # -----------------------------
 @dataclass
@@ -123,6 +199,195 @@ def calculate_metrics(steps: List[Dict]) -> Dict[str, Any]:
         metrics["min_run_length"] = 0
     
     return metrics
+
+
+# -----------------------------
+# Pure Benchmark Functions (No Logging - for accurate timing)
+# -----------------------------
+def benchmark_alg1(arr: List[int]) -> Tuple[List[int], int, int]:
+    """Algorithm 1 - pure benchmark without logging. Returns (sorted_arr, num_runs, num_merges)"""
+    if len(arr) <= 1:
+        return arr[:], 1, 0
+    
+    # Find runs
+    runs = []
+    cur_run = [arr[0]]
+    
+    for i in range(1, len(arr)):
+        if arr[i] >= arr[i-1]:
+            cur_run.append(arr[i])
+        else:
+            runs.append(cur_run[:])
+            cur_run = [arr[i]]
+    runs.append(cur_run)
+    
+    num_runs = len(runs)
+    num_merges = 0
+    
+    # Tournament merge
+    while len(runs) > 1:
+        next_level = []
+        for i in range(0, len(runs), 2):
+            if i + 1 < len(runs):
+                merged = merge_sorted(runs[i], runs[i+1])
+                next_level.append(merged)
+                num_merges += 1
+            else:
+                next_level.append(runs[i])
+        runs = next_level
+    
+    return runs[0], num_runs, num_merges
+
+
+def benchmark_alg2(arr: List[int]) -> Tuple[List[int], int, int]:
+    """Algorithm 2 - pure benchmark without logging. Returns (sorted_arr, num_runs, num_merges)"""
+    if len(arr) <= 1:
+        return arr[:], 1, 0
+    
+    # Find monotonic runs
+    runs = []
+    i = 0
+    
+    while i < len(arr):
+        if i == len(arr) - 1:
+            runs.append([arr[i]])
+            break
+        
+        # Detect direction
+        j = i
+        while j + 1 < len(arr) and arr[j+1] == arr[j]:
+            j += 1
+        
+        if j + 1 < len(arr):
+            is_inc = arr[j+1] > arr[j]
+        else:
+            is_inc = True
+        
+        # Build run
+        run = [arr[i]]
+        k = i
+        while k + 1 < len(arr):
+            if is_inc and arr[k+1] >= arr[k]:
+                run.append(arr[k+1])
+                k += 1
+            elif not is_inc and arr[k+1] <= arr[k]:
+                run.append(arr[k+1])
+                k += 1
+            else:
+                break
+        
+        # Normalize if decreasing
+        if not is_inc and len(run) >= 2 and run[0] > run[-1]:
+            run = list(reversed(run))
+        
+        runs.append(run)
+        i = k + 1
+    
+    num_runs = len(runs)
+    num_merges = 0
+    
+    # Tournament merge
+    while len(runs) > 1:
+        next_level = []
+        for i in range(0, len(runs), 2):
+            if i + 1 < len(runs):
+                merged = merge_sorted(runs[i], runs[i+1])
+                next_level.append(merged)
+                num_merges += 1
+            else:
+                next_level.append(runs[i])
+        runs = next_level
+    
+    return runs[0], num_runs, num_merges
+
+
+def benchmark_alg3(arr: List[int]) -> Tuple[List[int], int, int]:
+    """Algorithm 3 - pure benchmark without logging. Returns (sorted_arr, num_runs, num_merges)"""
+    if len(arr) <= 1:
+        return arr[:], 1, 0
+    
+    runs_inc = []
+    L = []
+    R = []
+    inc = float("-inf")
+    dec = float("inf")
+    num_merge_inv = 0
+    
+    def flush_block():
+        nonlocal L, R, inc, dec, runs_inc, num_merge_inv
+        if not L and not R:
+            return
+        
+        # Merge L (increasing) and R (decreasing)
+        result = []
+        i = 0
+        j = len(R) - 1
+        
+        while i < len(L) and j >= 0:
+            if L[i] <= R[j]:
+                result.append(L[i])
+                i += 1
+            else:
+                result.append(R[j])
+                j -= 1
+        
+        result.extend(L[i:])
+        while j >= 0:
+            result.append(R[j])
+            j -= 1
+        
+        runs_inc.append(result)
+        num_merge_inv += 1
+        
+        L = []
+        R = []
+        inc = float("-inf")
+        dec = float("inf")
+    
+    i = 0
+    while i < len(arr):
+        x = arr[i]
+        can_L = (x >= inc)
+        can_R = (x <= dec)
+        next_val = arr[i+1] if i+1 < len(arr) else None
+        
+        if can_L and can_R:
+            if next_val is None or x <= next_val:
+                L.append(x)
+                inc = x
+            else:
+                R.append(x)
+                dec = x
+            i += 1
+        elif can_L:
+            L.append(x)
+            inc = x
+            i += 1
+        elif can_R:
+            R.append(x)
+            dec = x
+            i += 1
+        else:
+            flush_block()
+    
+    flush_block()
+    
+    num_runs = len(runs_inc)
+    num_merges = num_merge_inv
+    
+    # Tournament merge
+    while len(runs_inc) > 1:
+        next_level = []
+        for i in range(0, len(runs_inc), 2):
+            if i + 1 < len(runs_inc):
+                merged = merge_sorted(runs_inc[i], runs_inc[i+1])
+                next_level.append(merged)
+                num_merges += 1
+            else:
+                next_level.append(runs_inc[i])
+        runs_inc = next_level
+    
+    return runs_inc[0] if runs_inc else [], num_runs, num_merges
 
 
 # -----------------------------
@@ -497,7 +762,21 @@ def build_runs_tree_alg3(arr: List[int]) -> Tuple[TreeNode, List[Dict]]:
         next_val = arr[i+1] if i+1 < len(arr) else None
         
         if can_L and can_R:
-            if next_val is not None and x <= next_val:
+            # Heuristic: nếu x <= next_val thì vào L, ngược lại vào R
+            # Nếu là phần tử cuối (không có next_val), ưu tiên vào L
+            if next_val is None:
+                # Phần tử cuối cùng, ưu tiên vào L (dãy tăng)
+                L.append(x)
+                inc = x
+                steps.append({
+                    "type": "put_L",
+                    "message": f"A[{i}]={x} → L (phần tử cuối, ưu tiên L)",
+                    "element": x,
+                    "L": L[:],
+                    "R": R[:]
+                })
+                i += 1
+            elif x <= next_val:
                 L.append(x)
                 inc = x
                 steps.append({
@@ -513,7 +792,7 @@ def build_runs_tree_alg3(arr: List[int]) -> Tuple[TreeNode, List[Dict]]:
                 dec = x
                 steps.append({
                     "type": "put_R",
-                    "message": f"A[{i}]={x} → R",
+                    "message": f"A[{i}]={x} → R (heuristic: {x} > {next_val})",
                     "element": x,
                     "L": L[:],
                     "R": R[:]
@@ -1261,6 +1540,30 @@ with st.sidebar:
                 status_text.empty()
     
     else:  # Comparison mode
+        # Show cache status
+        arr = st.session_state.get("arr", [])
+        if arr:
+            cached_results = load_comparison_cache(arr)
+            if cached_results:
+                st.success(f"✅ Đã có cache cho {len(arr)} phần tử - Load nhanh!")
+                col_run, col_clear = st.columns(2)
+                with col_run:
+                    use_cache = st.button("📦 Load từ Cache", type="primary")
+                with col_clear:
+                    if st.button("🗑️ Xóa cache & chạy lại"):
+                        clear_cache()
+                        cached_results = None
+                        st.rerun()
+                
+                if use_cache:
+                    st.session_state["comparison_results"] = cached_results
+                    st.session_state["tree"] = None
+                    st.session_state["steps"] = None
+                    st.session_state["comparison_from_cache"] = True
+                    st.rerun()
+            else:
+                use_cache = False
+        
         if st.button("🚀 Chạy so sánh 3 thuật toán", type="primary"):
             arr = st.session_state.get("arr", [])
             if not arr:
@@ -1272,62 +1575,91 @@ with st.sidebar:
                 progress_bar = st.progress(0)
                 status_text = st.empty()
                 
-                # Algorithm 1
-                status_text.text(f"🔄 Đang chạy Algorithm 1 với {len(arr)} phần tử...")
-                progress_bar.progress(10)
+                # ========================================
+                # BENCHMARK PHASE: Pure timing (no logging)
+                # ========================================
+                status_text.text(f"⏱️ Đang benchmark thuần túy (không log) với {len(arr)} phần tử...")
+                progress_bar.progress(5)
                 
+                # Run benchmark multiple times for accurate timing
+                benchmark_iterations = 10
+                
+                # Benchmark Algorithm 1
                 start_time = time.time()
+                for _ in range(benchmark_iterations):
+                    _, runs1, merges1 = benchmark_alg1(arr)
+                time1 = (time.time() - start_time) / benchmark_iterations
+                
+                progress_bar.progress(15)
+                
+                # Benchmark Algorithm 2
+                start_time = time.time()
+                for _ in range(benchmark_iterations):
+                    _, runs2, merges2 = benchmark_alg2(arr)
+                time2 = (time.time() - start_time) / benchmark_iterations
+                
+                progress_bar.progress(25)
+                
+                # Benchmark Algorithm 3
+                start_time = time.time()
+                for _ in range(benchmark_iterations):
+                    sorted_arr3, runs3, merges3 = benchmark_alg3(arr)
+                time3 = (time.time() - start_time) / benchmark_iterations
+                
+                progress_bar.progress(35)
+                status_text.text("✅ Benchmark hoàn tất! Đang chạy với logging để lấy chi tiết...")
+                
+                # ========================================
+                # LOGGING PHASE: Get steps for visualization
+                # ========================================
+                
+                # Algorithm 1 with logging
+                status_text.text(f"🔄 Đang chạy Algorithm 1 với logging...")
+                progress_bar.progress(45)
                 tree1, steps1 = build_runs_tree_alg1(arr)
-                time1 = time.time() - start_time
                 results["Algorithm 1"] = {
                     "tree": tree1,
                     "steps": steps1,
-                    "time": time1,
+                    "time": time1,  # Use benchmark time!
                     "metrics": calculate_metrics(steps1),
                     "sorted": tree1.array if tree1 else []
                 }
                 
-                progress_bar.progress(33)
-                status_text.text(f"✅ Algorithm 1 hoàn thành ({time1*1000:.2f}ms)")
-                time.sleep(0.2)
+                progress_bar.progress(55)
+                status_text.text(f"✅ Algorithm 1: {time1*1000:.4f}ms (pure), {runs1} runs")
+                time.sleep(0.1)
                 
-                # Algorithm 2
-                status_text.text(f"🔄 Đang chạy Algorithm 2 với {len(arr)} phần tử...")
-                progress_bar.progress(40)
-                
-                start_time = time.time()
+                # Algorithm 2 with logging
+                status_text.text(f"🔄 Đang chạy Algorithm 2 với logging...")
+                progress_bar.progress(65)
                 tree2, steps2 = build_runs_tree_alg2(arr)
-                time2 = time.time() - start_time
                 results["Algorithm 2"] = {
                     "tree": tree2,
                     "steps": steps2,
-                    "time": time2,
+                    "time": time2,  # Use benchmark time!
                     "metrics": calculate_metrics(steps2),
                     "sorted": tree2.array if tree2 else []
                 }
                 
-                progress_bar.progress(66)
-                status_text.text(f"✅ Algorithm 2 hoàn thành ({time2*1000:.2f}ms)")
-                time.sleep(0.2)
+                progress_bar.progress(75)
+                status_text.text(f"✅ Algorithm 2: {time2*1000:.4f}ms (pure), {runs2} runs")
+                time.sleep(0.1)
                 
-                # Algorithm 3
-                status_text.text(f"🔄 Đang chạy Algorithm 3 với {len(arr)} phần tử...")
-                progress_bar.progress(70)
-                
-                start_time = time.time()
+                # Algorithm 3 with logging
+                status_text.text(f"🔄 Đang chạy Algorithm 3 với logging...")
+                progress_bar.progress(85)
                 tree3, steps3 = build_runs_tree_alg3(arr)
-                time3 = time.time() - start_time
                 results["Algorithm 3"] = {
                     "tree": tree3,
                     "steps": steps3,
-                    "time": time3,
+                    "time": time3,  # Use benchmark time!
                     "metrics": calculate_metrics(steps3),
                     "sorted": tree3.array if tree3 else []
                 }
                 
                 progress_bar.progress(90)
-                status_text.text(f"✅ Algorithm 3 hoàn thành ({time3*1000:.2f}ms)")
-                time.sleep(0.2)
+                status_text.text(f"✅ Algorithm 3: {time3*1000:.4f}ms (pure), {runs3} runs")
+                time.sleep(0.1)
                 
                 status_text.text("📊 Đang tổng hợp kết quả...")
                 progress_bar.progress(95)
@@ -1335,6 +1667,12 @@ with st.sidebar:
                 st.session_state["comparison_results"] = results
                 st.session_state["tree"] = None
                 st.session_state["steps"] = None
+                
+                # Save to cache for future use
+                if len(arr) >= 100:  # Only cache for large datasets
+                    status_text.text("💾 Đang lưu cache...")
+                    if save_comparison_cache(arr, results):
+                        st.session_state["comparison_from_cache"] = False
                 
                 progress_bar.progress(100)
                 time.sleep(0.3)
